@@ -5,6 +5,10 @@ const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const cron = require('node-cron');
 require('dotenv').config();
 
+// Fix: beberapa hosting (Railway, Render, dll) gagal resolve DNS lewat IPv6.
+// Paksa Node pakai IPv4 dulu supaya fetch() ke API luar tidak ENOTFOUND.
+require('dns').setDefaultResultOrder('ipv4first');
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -17,12 +21,19 @@ const client = new Client({
 const TARGET_CHANNEL_ID = process.env.TARGET_CHANNEL_ID;
 
 // ==== Sumber gambar random pfp ====
-// Default pakai waifu.pics (anime style, gratis, tanpa API key).
-// Kalau mau pfp jenis lain, tinggal ganti fungsi ini.
+// Coba waifu.pics dulu, kalau gagal fallback ke nekos.best
 async function getRandomPfpUrl() {
-  const res = await fetch('https://api.waifu.pics/sfw/waifu');
-  const data = await res.json();
-  return data.url;
+  try {
+    const res = await fetch('https://api.waifu.pics/sfw/waifu');
+    if (!res.ok) throw new Error(`Status ${res.status}`);
+    const data = await res.json();
+    return data.url;
+  } catch (err) {
+    console.warn('waifu.pics gagal, coba fallback nekos.best:', err.message);
+    const res2 = await fetch('https://nekos.best/api/v2/waifu');
+    const data2 = await res2.json();
+    return data2.results[0].url;
+  }
 }
 
 // Ambil N gambar random (unik jika API mendukung, kalau tidak ya random biasa)
