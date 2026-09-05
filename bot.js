@@ -1,7 +1,7 @@
 // bot.js
 // Bot Discord: kirim 5 random pfp otomatis tiap 24 jam ke channel tertentu
 
-const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const cron = require('node-cron');
 require('dotenv').config();
 
@@ -21,26 +21,47 @@ const client = new Client({
 const TARGET_CHANNEL_ID = process.env.TARGET_CHANNEL_ID;
 
 // ==== Sumber gambar random pfp ====
-// Coba waifu.pics dulu, kalau gagal fallback ke nekos.best
-async function getRandomPfpUrl() {
+// Campuran beberapa kategori biar hasilnya variatif kayak koleksi "aesthetic pfp":
+// - anime/manga (waifu.pics, macam-macam endpoint biar gak itu-itu terus)
+// - kucing lucu (TheCatAPI)
+// - foto aesthetic/nature (Picsum, kadang grayscale biar mirip contoh)
+async function getRandomImageUrl() {
+  const categories = ['anime', 'cat', 'aesthetic'];
+  const category = categories[Math.floor(Math.random() * categories.length)];
+
   try {
-    const res = await fetch('https://api.waifu.pics/sfw/waifu');
-    if (!res.ok) throw new Error(`Status ${res.status}`);
-    const data = await res.json();
-    return data.url;
+    if (category === 'anime') {
+      const endpoints = ['waifu', 'neko', 'megumin', 'shinobu', 'smile', 'blush'];
+      const ep = endpoints[Math.floor(Math.random() * endpoints.length)];
+      const res = await fetch(`https://api.waifu.pics/sfw/${ep}`);
+      if (!res.ok) throw new Error(`Status ${res.status}`);
+      const data = await res.json();
+      return data.url;
+    }
+
+    if (category === 'cat') {
+      const res = await fetch('https://api.thecatapi.com/v1/images/search');
+      if (!res.ok) throw new Error(`Status ${res.status}`);
+      const data = await res.json();
+      return data[0].url;
+    }
+
+    // aesthetic: foto random, sebagian dibikin grayscale biar berasa moody/estetik
+    const seed = Math.floor(Math.random() * 100000);
+    const grayscale = Math.random() < 0.5 ? '?grayscale' : '';
+    return `https://picsum.photos/seed/${seed}/500/500${grayscale}`;
   } catch (err) {
-    console.warn('waifu.pics gagal, coba fallback nekos.best:', err.message);
-    const res2 = await fetch('https://nekos.best/api/v2/waifu');
-    const data2 = await res2.json();
-    return data2.results[0].url;
+    console.warn(`Gagal ambil dari kategori ${category}, fallback ke picsum:`, err.message);
+    const seed = Math.floor(Math.random() * 100000);
+    return `https://picsum.photos/seed/${seed}/500/500`;
   }
 }
 
-// Ambil N gambar random (unik jika API mendukung, kalau tidak ya random biasa)
+// Ambil N gambar random
 async function getMultiplePfps(count) {
   const urls = [];
   for (let i = 0; i < count; i++) {
-    const url = await getRandomPfpUrl();
+    const url = await getRandomImageUrl();
     urls.push(url);
   }
   return urls;
@@ -61,7 +82,7 @@ async function sendDailyPfps() {
       new EmbedBuilder()
         .setTitle(`Random PFP #${i + 1}`)
         .setImage(url)
-        .setColor(0x5865f2)
+        .setColor(0x2b2d31)
     );
 
     await channel.send({
