@@ -1,9 +1,11 @@
 // bot.js
 // Bot Discord: kirim 5 random pfp otomatis tiap 24 jam ke channel tertentu
 
-const { Client, GatewayIntentBits, EmbedBuilder, AttachmentBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, Partials } = require('discord.js');
 const cron = require('node-cron');
 require('dotenv').config();
+const commands = require('./commands');
+const config = require('./config.json');
 
 // Fix: beberapa hosting (Railway, Render, dll) gagal resolve DNS lewat IPv6.
 // Paksa Node pakai IPv4 dulu supaya fetch() ke API luar tidak ENOTFOUND.
@@ -14,8 +16,89 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildModeration,
   ],
+  partials: [Partials.Message, Partials.Channel],
 });
+
+const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
+const INVITE_REGEX = /(discord\.gg|discordapp\.com\/invite|discord\.com\/invite)\/\S+/i;
+const LINK_REGEX = /https?:\/\/\S+/i;
+
+// Map buat nyimpen histori pesan tiap user (anti-spam), key: userId, value: array timestamp
+const spamTracker = new Map();
+
+async function logModerationAction(guild, embed) {
+  if (!LOG_CHANNEL_ID) return;
+  try {
+    const logChannel = await guild.channels.fetch(LOG_CHANNEL_ID);
+    if (logChannel) await logChannel.send({ embeds: [embed] });
+  } catch (err) {
+    console.warn('Gagal kirim log moderasi:', err.message);
+  }
+}
+
+// ==== Cek anti-spam ====
+function isSpamming(userId) {
+  const now = Date.now();
+  const timestamps = (spamTracker.get(userId) || []).filter(
+    (t) => now - t < config.antiSpam.timeWindowMs
+  );
+  timestamps.push(now);
+  spamTracker.set(userId, timestamps);
+  return timestamps.length > config.antiSpam.maxMessages;
+}
+
+// ==== Handler moderasi otomatis untuk tiap pesan masuk ====
+async function handleAutoModeration(message) {
+  if (message.author.bot || !message.guild) return;
+  // Jangan tindak member yang punya izin ManageMessages (biasanya staff)
+  if (message.member?.permissions.has('ManageMessages')) return;
+
+  // Anti-link/invite
+  if (INVITE_REGEX.test(message.content) || LINK_REGEX.test(message.content)) {
+    await message.delete().catch(() => {});
+    const warn = await message.channel.send(
+      `🔗 <@${message.author.id}>, link/invite tidak diperbolehkan di sini.`
+    );
+    setTimeout(() => warn.delete().catch(() => {}), 5000);
+    return;
+  }
+
+  // Word filter
+  const lower = message.content.toLowerCase();
+  if (config.wordFilter.some((word) => lower.includes(word.toLowerCase()))) {
+    await message.delete().catch(() => {});
+    const warn = await message.channel.send(
+      `🤬 <@${message.author.id}>, kata-kata itu tidak diperbolehkan di sini.`
+    );
+    setTimeout(() => warn.delete().catch(() => {}), 5000);
+    return;
+  }
+
+  // Anti-spam
+  if (isSpamming(message.author.id)) {
+    try {
+      await message.member.timeout(
+        config.antiSpam.timeoutMinutes * 60 * 1000,
+        'Terdeteksi spam pesan'
+      );
+      const embed = new EmbedBuilder()
+        .setTitle('🚫 Anti-spam terpicu')
+        .setColor(0xe67e22)
+        .setDescription(
+          `<@${message.author.id}> di-timeout ${config.antiSpam.timeoutMinutes} menit karena mengirim pesan terlalu cepat.`
+        )
+        .setTimestamp();
+      await message.channel.send({ embeds: [embed] });
+      await logModerationAction(message.guild, embed);
+      spamTracker.delete(message.author.id);
+    } catch (err) {
+      console.warn('Gagal auto-timeout spam:', err.message);
+    }
+  }
+}
 
 // ID channel tempat pfp akan dikirim otomatis
 const TARGET_CHANNEL_ID = process.env.TARGET_CHANNEL_ID;
@@ -108,11 +191,34 @@ client.once('ready', () => {
   console.log('Jadwal pengiriman pfp otomatis sudah aktif (tiap hari jam 09:00).');
 });
 
-// Command manual untuk testing: ketik !pfp di channel manapun
+// Handler slash command
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+
+  const command = commands.find((c) => c.data.name === interaction.commandName);
+  if (!command) return;
+
+  try {
+    await command.execute(interaction);
+  } catch (err) {
+    console.error(`Error di command /${interaction.commandName}:`, err);
+    const reply = { content: '❌ Terjadi error saat menjalankan command ini.', ephemeral: true };
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp(reply);
+    } else {
+      await interaction.reply(reply);
+    }
+  }
+});
+
+// Command manual untuk testing pfp: ketik !pfp di channel manapun
+// + jalankan auto-moderation (anti-spam, anti-link, word filter) tiap pesan masuk
 client.on('messageCreate', async (message) => {
   if (message.content === '!pfp' && !message.author.bot) {
     await sendDailyPfps();
+    return;
   }
+  await handleAutoModeration(message);
 });
 
 client.login(process.env.DISCORD_TOKEN);
