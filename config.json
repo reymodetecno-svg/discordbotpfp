@@ -1,0 +1,10 @@
+{
+  "wordFilter": ["kontol", "anjing", "goblok", "babi"],
+  "antiSpam": {
+    "maxMessages": 5,
+    "timeWindowMs": 5000,
+    "timeoutMinutes": 5
+  },
+  "autoTimeoutAfterWarnings": 3,
+  "autoTimeoutMinutes": 10
+}
