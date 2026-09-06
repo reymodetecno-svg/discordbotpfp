@@ -17,17 +17,23 @@ const client = new Client({
 const TARGET_CHANNEL_ID = process.env.TARGET_CHANNEL_ID;
 
 // ==== Sumber gambar random pfp ====
-// Campuran: foto wajah realistis (gaya pp WA/sosmed), foto aesthetic, dan kucing lucu.
+// Campuran 4 gaya: realistis (WA-style), anime/kartun, aesthetic, dan kucing lucu.
 async function getRandomImageUrl() {
-  const categories = ['realistic', 'realistic', 'aesthetic', 'cat'];
+  const categories = ['realistic', 'anime', 'aesthetic', 'cat'];
   const category = categories[Math.floor(Math.random() * categories.length)];
 
   try {
     if (category === 'realistic') {
       // Foto wajah manusia realistis hasil AI (bukan orang beneran), cocok gaya pfp WA/sosmed.
-      // Situs ini langsung ngasih file gambar tiap request, jadi URL-nya langsung dipakai
-      // di embed (Discord akan hotlink otomatis dan ambil gambar terbaru tiap kali).
       return 'https://thispersondoesnotexist.com/';
+    }
+
+    if (category === 'anime') {
+      const endpoints = ['waifu', 'neko', 'megumin', 'shinobu', 'smile', 'blush'];
+      const ep = endpoints[Math.floor(Math.random() * endpoints.length)];
+      const res = await fetch(`https://api.waifu.pics/sfw/${ep}`);
+      const data = await res.json();
+      return data.url;
     }
 
     if (category === 'cat') {
